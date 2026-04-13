@@ -1,32 +1,40 @@
+"use client";
 import React, { useState, useCallback } from "react";
 import { InboxOutlined } from "@ant-design/icons";
 import type { UploadProps, UploadFile } from "antd";
-import { message, Upload, Select, Spin } from "antd";
+import { message, Upload, Select, Spin, Button } from "antd";
 import * as XLSX from "xlsx";
 import { useExcelStore } from "@/stores/excelStore";
 import { useShallow } from "zustand/react/shallow";
 
 const { Dragger } = Upload;
-const { Option } = Select;
+
+// 👇 define type dùng chung
+type SheetType = "normal" | "schedule";
 
 const UploadExcel: React.FC = () => {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const { setFileInfo, loadSheetData, clearData } = useExcelStore(
+  const {
+    sheets,
+    sheetKeys,
+    setFileInfo,
+    setSheetType,
+    loadAllSheets,
+    clearData,
+  } = useExcelStore(
     useShallow((state) => ({
-      fileName: state.fileName,
       sheets: state.sheets,
-      allSheetsData: state.allSheetsData,
-      sheetConfigs: state.sheetConfigs,
-      currentData: state.currentData,
+      sheetKeys: state.sheetKeys,
       setFileInfo: state.setFileInfo,
-      setSheetConfig: state.setSheetConfig,
-      loadSheetData: state.loadSheetData,
+      setSheetType: state.setSheetType,
+      loadAllSheets: state.loadAllSheets,
       clearData: state.clearData,
     })),
   );
 
+  // ================= READ FILE =================
   const readExcelFile = useCallback(
     (file: File) => {
       setLoading(true);
@@ -34,20 +42,16 @@ const UploadExcel: React.FC = () => {
 
       reader.onload = (e) => {
         try {
-          const dataArray = new Uint8Array(e.target?.result as ArrayBuffer);
-          const wb = XLSX.read(dataArray, { type: "array" });
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const wb = XLSX.read(data, { type: "array" });
 
-          const sheetNames = wb.SheetNames;
-
-          setFileInfo(file.name, sheetNames, wb);
-
-          // Load dữ liệu tất cả các sheet
-          sheetNames.forEach((sheetName) => {
-            loadSheetData(sheetName);
-          });
-        } catch (error) {
+          setFileInfo(file.name, wb.SheetNames, wb);
+          // setTimeout(() => {
+          //   loadAllSheets();
+          // }, 0);
+        } catch (err) {
+          console.error(err);
           message.error("Đọc file Excel thất bại!");
-          console.error(error);
         } finally {
           setLoading(false);
         }
@@ -55,18 +59,21 @@ const UploadExcel: React.FC = () => {
 
       reader.readAsArrayBuffer(file);
     },
-    [setFileInfo, loadSheetData],
+    [setFileInfo],
   );
 
+  // ================= UPLOAD CONFIG =================
   const props: UploadProps = {
     name: "file",
     multiple: false,
     accept: ".xlsx,.xls",
     fileList,
+
     beforeUpload: (file) => {
       const isExcel = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+
       if (!isExcel) {
-        message.error("Chỉ chấp nhận file Excel (.xlsx, .xls)!");
+        message.error("Chỉ chấp nhận file Excel!");
         return Upload.LIST_IGNORE;
       }
 
@@ -74,27 +81,65 @@ const UploadExcel: React.FC = () => {
       setFileList([file as UploadFile]);
       return false;
     },
+
     onRemove: () => {
       setFileList([]);
       clearData();
     },
   };
 
+  // ================= RENDER =================
   return (
     <div>
+      {/* Upload */}
       <Spin spinning={loading}>
         <Dragger {...props}>
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
-          <p className="ant-upload-text text-white!">
-            Click hoặc kéo thả file Excel vào đây
-          </p>
-          <p className="ant-upload-hint text-white!">
-            Hỗ trợ file .xlsx, .xls. Bạn có thể đổi tên cột cho từng sheet.
-          </p>
+          <p className="text-white">Upload Excel</p>
         </Dragger>
       </Spin>
+
+      {/* Select Sheet Type */}
+      {sheets.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          {sheets.map((sheet) => {
+            const key = sheetKeys[sheet];
+
+            return (
+              <div key={sheet} style={{ marginBottom: 12 }}>
+                <div style={{ color: "#fff", marginBottom: 4 }}>{sheet}</div>
+
+                {/* 👇 FIX TYPE ở đây */}
+                <Select<SheetType>
+                  defaultValue="normal"
+                  style={{ width: "100%" }}
+                  onChange={(value) => {
+                    setSheetType(key, value);
+                  }}
+                  options={[
+                    {
+                      label: "Dữ liệu bình thường (dòng đầu tiêu đề)",
+                      value: "normal",
+                    },
+                    { label: "Dữ liệu kiểu ma trận", value: "schedule" },
+                  ]}
+                />
+              </div>
+            );
+          })}
+
+          {/* Parse Button */}
+          <Button
+            type="primary"
+            style={{ marginTop: 10, width: "100%" }}
+            onClick={loadAllSheets}
+          >
+            Parse Data
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

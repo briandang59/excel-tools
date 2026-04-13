@@ -1,195 +1,156 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import * as XLSX from "xlsx";
 import { toCamelCase } from "@/utils/functions/common/toCamelCase";
-import { parseToDate } from "@/utils/functions/common/parseToDate";
-export interface ExcelRow {
-  [key: string]: any;
-}
 
-interface SheetConfig {
-  originalName: string;
-  camelCaseName: string;
-  displayName?: string;
-  columnMap: Record<string, string>;
-  selectedColumns?: string[];
-}
+// ================= TYPES =================
+
+export type ExcelRow = Record<string, any>;
+
+type SheetType = "normal" | "schedule";
+
+// raw row từ header:1
+type SheetRawRow = (string | number | null | undefined)[];
 
 interface ExcelStore {
   fileName: string;
   sheets: string[];
   sheetKeys: Record<string, string>;
   workbook: XLSX.WorkBook | null;
+
+  sheetTypes: Record<string, SheetType>;
   allSheetsData: Record<string, ExcelRow[]>;
-  sheetConfigs: Record<string, SheetConfig>;
-  currentSheetKey: string;
-  currentData: ExcelRow[];
 
   setFileInfo: (
     fileName: string,
     sheets: string[],
     workbook: XLSX.WorkBook,
   ) => void;
+
+  setSheetType: (sheetKey: string, type: SheetType) => void;
   loadAllSheets: () => void;
-  loadSheetData: (sheetKey: string) => void;
-  changeCurrentSheet: (originalSheetName: string) => void;
-  setSheetConfig: (sheetKey: string, config: Partial<SheetConfig>) => void;
   clearData: () => void;
 }
 
-// Kiểm tra một giá trị có phải là Excel date không (rất quan trọng)
-const isExcelDate = (value: any, columnName: string): boolean => {
-  if (typeof value !== "number" || value < 25569 || value > 100000)
-    return false;
+// ================= HELPERS =================
 
-  // Kiểm tra tên cột chứa từ date-related
-  const lowerCol = columnName.toLowerCase();
-  return (
-    lowerCol.includes("date") ||
-    lowerCol.includes("ngày") ||
-    lowerCol.includes("time") ||
-    lowerCol.includes("shift") ||
-    lowerCol.includes("day")
+// tìm dòng chứa "Employee ID"
+const findHeaderRow = (raw: SheetRawRow[]): number => {
+  return raw.findIndex((row) =>
+    row?.some((cell) =>
+      String(cell || "")
+        .toLowerCase()
+        .includes("employee id"),
+    ),
   );
 };
 
-// ==================== STORE ====================
+// ================= STORE =================
 
-export const useExcelStore = create<ExcelStore>()(
-  persist(
-    (set, get) => ({
+export const useExcelStore = create<ExcelStore>((set, get) => ({
+  fileName: "",
+  sheets: [],
+  sheetKeys: {},
+  workbook: null,
+  sheetTypes: {},
+  allSheetsData: {},
+
+  // ===== SET FILE =====
+  setFileInfo: (fileName, originalSheets, workbook) => {
+    const sheetKeys: Record<string, string> = {};
+    const sheetTypes: Record<string, SheetType> = {};
+
+    originalSheets.forEach((name) => {
+      const key = toCamelCase(name);
+      sheetKeys[name] = key;
+      sheetTypes[key] = "normal"; // default
+    });
+
+    set({
+      fileName,
+      sheets: originalSheets,
+      sheetKeys,
+      workbook,
+      sheetTypes,
+      allSheetsData: {},
+    });
+  },
+
+  // ===== SET TYPE =====
+  setSheetType: (sheetKey, type) =>
+    set((state) => ({
+      sheetTypes: {
+        ...state.sheetTypes,
+        [sheetKey]: type,
+      },
+    })),
+
+  // ===== LOAD ALL SHEETS =====
+  loadAllSheets: () => {
+    const { workbook, sheetKeys, sheetTypes } = get();
+    if (!workbook) return;
+
+    Object.keys(sheetKeys).forEach((originalName) => {
+      const sheetKey = sheetKeys[originalName];
+      const worksheet = workbook.Sheets[originalName];
+      if (!worksheet) return;
+
+      const type = sheetTypes[sheetKey] || "normal";
+      let jsonData: ExcelRow[] = [];
+
+      // ================= SCHEDULE =================
+      if (type === "schedule") {
+        const raw = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+        }) as SheetRawRow[];
+
+        const headerRowIndex = findHeaderRow(raw);
+
+        if (headerRowIndex !== -1) {
+          jsonData = XLSX.utils.sheet_to_json(worksheet, {
+            range: headerRowIndex,
+            defval: null,
+          }) as ExcelRow[];
+        } else {
+          console.warn(`Không tìm thấy header trong sheet ${originalName}`);
+        }
+      }
+
+      // ================= NORMAL =================
+      else {
+        jsonData = XLSX.utils.sheet_to_json(worksheet, {
+          defval: null,
+        }) as ExcelRow[];
+      }
+
+      // ===== OPTIONAL: convert key camelCase =====
+      jsonData = jsonData.map((row) => {
+        const newRow: ExcelRow = {};
+
+        Object.keys(row).forEach((key) => {
+          newRow[toCamelCase(key)] = row[key];
+        });
+
+        return newRow;
+      });
+
+      // ===== SAVE =====
+      set((state) => ({
+        allSheetsData: {
+          ...state.allSheetsData,
+          [sheetKey]: jsonData,
+        },
+      }));
+    });
+  },
+
+  // ===== CLEAR =====
+  clearData: () =>
+    set({
       fileName: "",
       sheets: [],
       sheetKeys: {},
       workbook: null,
+      sheetTypes: {},
       allSheetsData: {},
-      sheetConfigs: {},
-      currentSheetKey: "",
-      currentData: [],
-
-      setFileInfo: (fileName, originalSheets, workbook) => {
-        const sheetKeys: Record<string, string> = {};
-        const initialConfigs: Record<string, SheetConfig> = {};
-
-        originalSheets.forEach((originalName) => {
-          const camelKey = toCamelCase(originalName);
-          sheetKeys[originalName] = camelKey;
-
-          initialConfigs[camelKey] = {
-            originalName,
-            camelCaseName: camelKey,
-            displayName: originalName,
-            columnMap: {},
-            selectedColumns: [],
-          };
-        });
-
-        set({
-          fileName,
-          sheets: originalSheets,
-          sheetKeys,
-          workbook,
-          sheetConfigs: initialConfigs,
-          allSheetsData: {},
-          currentSheetKey: sheetKeys[originalSheets[0]] || "",
-          currentData: [],
-        });
-
-        // Load tất cả sheet
-        setTimeout(() => get().loadAllSheets(), 80);
-      },
-
-      loadAllSheets: () => {
-        const { workbook, sheetKeys, sheetConfigs } = get();
-        if (!workbook) return;
-
-        const originalSheetNames = Object.keys(sheetKeys);
-
-        originalSheetNames.forEach((originalName) => {
-          const sheetKey = sheetKeys[originalName];
-          const worksheet = workbook.Sheets[originalName];
-          if (!worksheet) return;
-
-          let jsonData: ExcelRow[] = XLSX.utils.sheet_to_json(worksheet, {
-            defval: null,
-            blankrows: false,
-            raw: false, // Quan trọng: để xlsx tự parse một số kiểu dữ liệu
-          });
-
-          const colMap = sheetConfigs[sheetKey]?.columnMap || {};
-
-          jsonData = jsonData.map((row) => {
-            const newRow: ExcelRow = {};
-
-            Object.keys(row).forEach((originalCol) => {
-              let finalCol = colMap[originalCol] || toCamelCase(originalCol);
-              let value = row[originalCol];
-
-              // === TỰ ĐỘNG CHUYỂN DATE TRIỆT ĐỂ ===
-              if (isExcelDate(value, originalCol)) {
-                value = parseToDate(value);
-              }
-
-              newRow[finalCol] = value;
-            });
-
-            return newRow;
-          });
-
-          set((state) => ({
-            allSheetsData: {
-              ...state.allSheetsData,
-              [sheetKey]: jsonData,
-            },
-          }));
-
-          if (originalName === originalSheetNames[0]) {
-            set({ currentData: jsonData });
-          }
-        });
-      },
-
-      loadSheetData: (sheetKey: string) => {
-        const { allSheetsData } = get();
-        if (allSheetsData[sheetKey]) {
-          set({ currentData: allSheetsData[sheetKey] });
-        }
-      },
-
-      changeCurrentSheet: (originalSheetName: string) => {
-        const { sheetKeys, allSheetsData } = get();
-        const sheetKey = sheetKeys[originalSheetName];
-        if (!sheetKey) return;
-
-        set({ currentSheetKey: sheetKey });
-
-        if (allSheetsData[sheetKey]) {
-          set({ currentData: allSheetsData[sheetKey] });
-        } else {
-          get().loadSheetData(sheetKey);
-        }
-      },
-
-      setSheetConfig: (sheetKey, config) =>
-        set((state) => ({
-          sheetConfigs: {
-            ...state.sheetConfigs,
-            [sheetKey]: { ...state.sheetConfigs[sheetKey], ...config },
-          },
-        })),
-
-      clearData: () =>
-        set({
-          fileName: "",
-          sheets: [],
-          sheetKeys: {},
-          workbook: null,
-          allSheetsData: {},
-          sheetConfigs: {},
-          currentSheetKey: "",
-          currentData: [],
-        }),
     }),
-    { name: "excel-storage" },
-  ),
-);
+}));

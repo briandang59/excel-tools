@@ -11,7 +11,7 @@ export const exportToExcel = (data: any[]) => {
         "Shift Pattern Name": s.shiftPatternName || "",
         "Job Site Name": s.jobSite || "",
         "Role Name": s.roleName || "",
-        "Date (dd-mmm-yy)": dayjs(s.date).format("YYYY-MM-DD"),
+        "Date (dd-mmm-yy)": dayjs(s.date).format("YYYY/MM/DD"),
         "Shift Day": dayjs(s.date).format("dddd"),
         "Shift Timing": s.shiftTiming || "",
         "Shift Day Id": s.shiftDayId || "",

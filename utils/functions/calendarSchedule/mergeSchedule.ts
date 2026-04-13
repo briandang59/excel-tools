@@ -47,7 +47,7 @@ const parseDate = (date: any): string => {
     "DD/MM/YYYY",
   ]);
 
-  return parsed.isValid() ? parsed.format("YYYY-MM-DD") : String(date);
+  return parsed.isValid() ? parsed.format("YYYY/MM/DD") : String(date);
 };
 
 // Extract tag: 0(7,1)

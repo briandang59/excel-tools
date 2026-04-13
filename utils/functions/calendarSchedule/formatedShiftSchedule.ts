@@ -1,47 +1,76 @@
 import dayjs from "dayjs";
 
 export const formattedShiftSchedule = (rawData: any[]): any[] => {
-  if (!Array.isArray(rawData) || rawData.length < 2) return [];
+  if (!Array.isArray(rawData) || rawData.length === 0) return [];
 
-  const headerRow = rawData[0];
-  const dateMap: Record<string, string> = {};
+  const result = rawData.map((row, rowIndex) => {
+    const employeeID = row.employeeID;
+    if (employeeID == null) return null;
 
-  Object.keys(headerRow).forEach((key) => {
-    if (key.startsWith("eMPTY") && key !== "eMPTY") {
-      const dateStr = headerRow[key];
-      if (dateStr && typeof dateStr === "string") {
-        const normalizedDate = dateStr.replace(/\//g, "-").padStart(10, "0");
-        dateMap[key] = normalizedDate;
-      }
-    }
-  });
-
-  const result = rawData.slice(1).map((row, index) => {
-    const employeeID = row.eMPTY || null;
     const shiftSchedule: { date: string; shiftTag: any }[] = [];
 
-    if (employeeID === null) return;
-    Object.keys(row).forEach((key) => {
-      if (key === "eMPTY" || !key.startsWith("eMPTY")) return;
+    console.log(`\n=== EmployeeID: ${employeeID} ===`);
 
-      const date = dateMap[key];
+    Object.keys(row).forEach((key) => {
+      if (key === "employeeID") return;
+      if (!/^\d+$/.test(key)) return;
+
       const shiftTag = row[key];
 
-      if (date) {
-        shiftSchedule.push({
-          date: dayjs(date).format("YYYY-MM-DD"),
-          shiftTag: shiftTag === null || shiftTag === "" ? null : shiftTag,
-        });
+      let dateStr = "";
+      let debug = "";
+
+      const year = key.substring(0, 4);
+
+      if (key.length === 6) {
+        // 202651 → 2026-05-01
+        const month = key.substring(4, 5); // "5"
+        const day = key.substring(5, 6); // "1"
+        dateStr = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        debug = "6 chữ số (YYYY M D)";
+      } else if (key.length === 7) {
+        // 2026419 → 2026-04-19
+        // 2026510 → 2026-05-10
+        const month = key.substring(4, 5); // "4" hoặc "5"
+        const day = key.substring(5, 7); // "19" hoặc "10"
+        dateStr = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+        debug = "7 chữ số (YYYY M DD)";
+      } else if (key.length === 8) {
+        // Trường hợp đầy đủ YYYYMMDD
+        const month = key.substring(4, 6);
+        const day = key.substring(6, 8);
+        dateStr = `${year}-${month}-${day}`;
+        debug = "8 chữ số (YYYYMMDD)";
+      } else {
+        console.warn(`Key lạ: ${key}`);
+        return;
       }
+
+      const parsedDate = dayjs(dateStr, "YYYY-MM-DD", true); // strict parsing
+      const formattedDate = parsedDate.format("YYYY-MM-DD");
+      const isValid = parsedDate.isValid();
+
+      console.log(
+        `Key: ${key.padEnd(8)} → ${dateStr} → ${formattedDate} ` +
+          `(${isValid ? "✓ OK" : "✗ Invalid"}) | ${debug}`,
+      );
+
+      if (!isValid) {
+        console.warn(`   → Ngày không hợp lệ!`);
+      }
+
+      shiftSchedule.push({
+        date: formattedDate,
+        shiftTag: shiftTag === null || shiftTag === "" ? null : shiftTag,
+      });
     });
 
     shiftSchedule.sort((a, b) => a.date.localeCompare(b.date));
 
-    return {
-      employeeID,
-      shiftSchedule,
-    };
+    return { employeeID, shiftSchedule };
   });
 
-  return result;
+  return result.filter(
+    (item): item is NonNullable<typeof item> => item !== null,
+  );
 };

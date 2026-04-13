@@ -43,7 +43,7 @@ export default function Home() {
       <div className="relative z-10 w-full max-w-2xl p-6">
         <div className="backdrop-blur-md bg-white/10 border border-white/20 rounded-2xl shadow-xl p-6 flex flex-col gap-6">
           <h1 className="text-2xl font-bold text-white text-center">
-            Excel Schedule Tool
+            Excel Tool
           </h1>
 
           <UploadExcel />
