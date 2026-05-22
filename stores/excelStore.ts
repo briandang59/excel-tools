@@ -106,10 +106,40 @@ export const useExcelStore = create<ExcelStore>((set, get) => ({
         const headerRowIndex = findHeaderRow(raw);
 
         if (headerRowIndex !== -1) {
-          jsonData = XLSX.utils.sheet_to_json(worksheet, {
-            range: headerRowIndex,
-            defval: null,
-          }) as ExcelRow[];
+          // Đọc header thủ công bằng raw cell value (cell.v) thay vì formatted text (cell.w)
+          // Lý do: date cell có format "m/d" → cell.w = "5/24" nhưng cell.v = 46166 (serial)
+          // Nếu dùng sheet_to_json với range, nó sẽ dùng cell.w làm key → key sai ("5/24" → "524")
+          const sheetRange = XLSX.utils.decode_range(worksheet["!ref"] || "A1");
+          const rawHeaders: string[] = [];
+
+          for (let c = sheetRange.s.c; c <= sheetRange.e.c; c++) {
+            const addr = XLSX.utils.encode_cell({ r: headerRowIndex, c });
+            const cell = worksheet[addr];
+            if (!cell || cell.v == null) {
+              rawHeaders.push(`__col_${c}`);
+              continue;
+            }
+            // Date cell: type 'n', serial > 25569 (offset về Unix epoch)
+            // → giữ nguyên serial number làm key (e.g. "46166")
+            if (cell.t === "n" && typeof cell.v === "number" && cell.v > 25569) {
+              rawHeaders.push(String(cell.v));
+            } else {
+              rawHeaders.push(String(cell.v));
+            }
+          }
+
+          // Build jsonData từ raw headers
+          jsonData = [];
+          for (let r = headerRowIndex + 1; r <= sheetRange.e.r; r++) {
+            const row: ExcelRow = {};
+            for (let c = sheetRange.s.c; c <= sheetRange.e.c; c++) {
+              const addr = XLSX.utils.encode_cell({ r, c });
+              const cell = worksheet[addr];
+              const header = rawHeaders[c - sheetRange.s.c];
+              row[header] = cell != null ? cell.v : null;
+            }
+            jsonData.push(row);
+          }
         } else {
           console.warn(`Không tìm thấy header trong sheet ${originalName}`);
         }

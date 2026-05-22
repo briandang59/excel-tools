@@ -1,5 +1,11 @@
 import dayjs from "dayjs";
 
+// Convert Excel date serial number → JS Date
+// Excel epoch: Jan 1, 1900 (with the 1900 leap-year bug → offset 25569 to Unix epoch)
+const excelSerialToDate = (serial: number): dayjs.Dayjs => {
+  return dayjs(new Date((serial - 25569) * 86400 * 1000));
+};
+
 export const formattedShiftSchedule = (rawData: any[]): any[] => {
   if (!Array.isArray(rawData) || rawData.length === 0) return [];
 
@@ -22,7 +28,13 @@ export const formattedShiftSchedule = (rawData: any[]): any[] => {
 
       const year = key.substring(0, 4);
 
-      if (key.length === 6) {
+      if (key.length === 5) {
+        // Excel date serial (e.g. 46166 = 2026-05-24)
+        // xlsx library giữ nguyên số serial khi không bật cellDates
+        const serial = parseInt(key, 10);
+        dateStr = excelSerialToDate(serial).format("YYYY-MM-DD");
+        debug = "5 chữ số (Excel serial)";
+      } else if (key.length === 6) {
         // 202651 → 2026-05-01
         const month = key.substring(4, 5); // "5"
         const day = key.substring(5, 6); // "1"
